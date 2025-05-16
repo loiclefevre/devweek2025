@@ -328,10 +328,13 @@ BEGIN
       p_comments       => NULL,
       p_source         => 
 'begin
+  OWA_UTIL.mime_header(''application/json'', TRUE);
   insert into PRODUCTS_DV(data) values( json_transform(:body_text, RENAME ''$.NAME'' = ''_id'') );
   commit;
+  htp.p(''{}'');
+  :status_code := 201;
+exception when others then :status_code := 409;
 end;');
-  
         
 COMMIT;
 
