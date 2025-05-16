@@ -129,7 +129,12 @@ select ai narrate what is the Oracle Database API for MongoDB;
 select ai narrate what is the OSON format in the Oracle database;
 
 
+-- ####################################################################################################
+-- JSON schema
+
+-- setup
 exec ords.enable_schema;
+
 
 -- Client-side validation using JSON Schema
 -- https://github.com/remoteoss/json-schema-form
