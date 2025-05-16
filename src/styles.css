@@ -1,0 +1,40 @@
+html {
+    font-family: sans-serif;
+    box-sizing: border-box;
+  }
+  
+  body {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 16px;
+    background-image: url("/public/img/23ai.png");
+    background-repeat: no-repeat;
+    background-position: right 200px;
+  }
+  
+  html * {
+    box-sizing: inherit;
+  }
+  
+  .navigation {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    border-top: 1px solid gray;
+    padding: 16px;
+  }
+  
+  .navigation ul {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .navigation ul a {
+    color: inherit;
+  }
+  
