@@ -493,12 +493,9 @@ select dbms_json_schema.describe('PRODUCTS_DV');
 -- Insert JSON in a Relational table (Bridging the Gap...)
 -- by using the JSON Relational Duality View
 insert into PRODUCTS_DV(data) values( 
-    json_transform( '{"NAME": "Other nice product", 
-                      "PRICE": 5, 
-                      "QUANTITY": 10}', 
-                    RENAME '$.NAME' = '_id'
-    )
-);
+    json {'_id' : 'Other nice product', 
+          'PRICE' : 5, 
+          'QUANTITY' : 10} );
 commit;
 
 select * from products_dv;
@@ -538,142 +535,245 @@ commit;
 
 select * from products;
 
-BEGIN
-  ORDS.ENABLE_SCHEMA(
-      p_enabled             => TRUE,
-      p_schema              => 'LOIC',
-      p_url_mapping_type    => 'BASE_PATH',
-      p_url_mapping_pattern => 'loic',
-      p_auto_rest_auth      => FALSE);
-    
-  ORDS.DEFINE_MODULE(
-      p_module_name    => 'loic',
-      p_base_path      => '/schema_repository/',
-      p_items_per_page => 25,
-      p_status         => 'PUBLISHED',
-      p_comments       => NULL);
+-- Introducing Data Use Case Domains
+create domain if not exists jsonb as json;
 
-  ORDS.DEFINE_TEMPLATE(
-      p_module_name    => 'loic',
-      p_pattern        => 'products',
-      p_priority       => 0,
-      p_etag_type      => 'HASH',
-      p_etag_query     => NULL,
-      p_comments       => NULL);
-
-  ORDS.DEFINE_HANDLER(
-      p_module_name    => 'loic',
-      p_pattern        => 'products',
-      p_method         => 'GET',
-      p_source_type    => 'json/item',
-      p_mimes_allowed  => NULL,
-      p_comments       => NULL,
-      p_source         => 
-'select getAnnotatedJSONSchema(''PRODUCTS'') as schema');
-
-  ORDS.DEFINE_HANDLER(
-      p_module_name    => 'loic',
-      p_pattern        => 'products',
-      p_method         => 'POST',
-      p_source_type    => 'plsql/block',
-      p_mimes_allowed  => NULL,
-      p_comments       => NULL,
-      p_source         => 
-'begin
-  OWA_UTIL.mime_header(''application/json'', TRUE);
-  insert into PRODUCTS_DV(data) values( json_transform(:body_text, RENAME ''$.NAME'' = ''_id'') );
-  commit;
-  htp.p(''{}'');
-  :status_code := 201;
-exception when others then :status_code := 409;
-end;');
-        
-COMMIT;
-
-END;
-
-/
-
-
-
-
-
-create json collection table customers;
-
-insert /*+ append */ into customers(data)
-select json { 'name' : 'Customer ' || level,
-              'data' : dbms_random.string('X',4000),
-              'active' : case when dbms_random.value < 0.05 then true else false end } from dual connect by level <= 100000;
-commit;
-
-insert /*+ append */ into customers(data)
-select json_transform(data, set '$.active' = false, set '$._id' = json_id('OID')) from customers;
-commit;
-
-
-select /*+ NOPARALLEL OPT_PARAM('cell_offload_processing' 'false') */ count(*) from customers
-where json_exists(data, '$.active?(@ == true)');
-
-select count(*) from customers;
-select avg(length(data)) from customers;
-
-select count(*) from customers
-where json_exists(data, '$.active?(@ == true)');
-
-
-SET DEFINE OFF
-BEGIN
-  DBMS_CLOUD.CREATE_EXTERNAL_TABLE (
-   table_name => 'ext_tab_url',
-   file_uri_list => 'https://opendata.paris.fr/api/records/1.0/search/?dataset=arbresremarquablesparis&q=&lang=en&rows=200&facet=genre&facet=espece&facet=stadedeveloppement&facet=varieteoucultivar&facet=dateplantation&facet=libellefrancais',
-   column_list => 'DATA JSON'
+create table test ( 
+  data jsonb -- JSON alias
 );
-END;
-/
 
-create or replace mle module json_fetch
-language javascript as
-import "mle-js-fetch";
-export async function fetchJSONData(url) {
-    if (url === undefined || url.length < 0) {
-        throw Error("please provide a valid URL");
+-- Another way to validate JSON data: Data Use Case Domain
+-- drop table if exists posts purge;
+-- drop domain if exists BlogPost;
+create domain if not exists BlogPost as json
+validate '{
+        "$id": "https://example.com/blog-post.schema.json",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "A representation of a blog post",
+        "type": "object",
+        "required": ["title", "content", "author"],
+        "properties": {
+            "title": {
+            "type": "string"
+            },
+            "content": {
+            "type": "string"
+            },
+            "publishedDate": {
+            "type": "string",
+            "format": "date-time"
+            },
+            "author": {
+            "$ref": "https://example.com/user-profile.schema.json"
+            },
+            "tags": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+            }
+        },
+        "$def": {
+            "$id": "https://example.com/user-profile.schema.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "description": "A representation of a user profile",
+            "type": "object",
+            "required": ["username", "email"],
+            "properties": {
+            "username": {
+                "type": "string"
+            },
+            "email": {
+                "type": "string",
+                "format": "email"
+            },
+            "fullName": {
+                "type": "string"
+            },
+            "age": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "location": {
+                "type": "string"
+            },
+            "interests": {
+                "type": "array",
+                "items": {
+                "type": "string"
+                }
+            }
+            }
+        }
+        }';
+
+-- Now use the Domain as a new column data type!
+create table posts ( content BlogPost );
+
+-- fails
+insert into posts values (json{ 'garbageDocument' : true });
+
+-- works
+insert into posts values (
+    json {
+        'title': 'Best brownies recipe ever!',
+        'content': 'Take chocolate...',
+        'publishedDate': '2025-05-21T13:00:00Z',
+        'author': {
+            'username': 'Loïc',
+            'email': 'loic@email.com'
+        },
+        'tags': ['Cooking', 'Chocolate', 'Cocooning']
     }
-    const response = await fetch(url);
-    if (! response.ok) {
-        throw new Error(`An error occurred: ${response.status}`);
-    }
-    return await response.json();
-}
-/
+);
+commit;
 
-create or replace function fetchJSONData( p_url varchar2 ) 
-return json
-as mle module json_fetch
-signature 'fetchJSONData';
-/
+-- Now let's look at the publishedDate field...
+select p.content.publishedDate from posts p;
 
-set define §;
-set verify off;
-with my_data(doc) as (select treat(fetchJSONData('https://opendata.paris.fr/api/records/1.0/search/?dataset=arbresremarquablesparis&q=&lang=en&rows=200&facet=genre&facet=espece&facet=stadedeveloppement&facet=varieteoucultivar&facet=dateplantation&facet=libellefrancais') as json))
---select doc from my_data;
-select to_char(j.birthday,'DD/MM/YYYY') as birthday,
-       j.name,
-       j.location
-  from my_data nested doc columns ( nested records[*] columns (
-  birthday timestamp path '$.fields.arbres_dateplantation.timestamp()',
-  name path '$.fields.arbres_libellefrancais',
-  location path '$.fields.arbres_arrondissement'
-) ) j
-order by j.birthday fetch first 3 rows only;
+-- ...its binary encoded data type is 'string'
+select p.content.publishedDate.type() as type from posts p;
 
-BEGIN
-    DBMS_NETWORK_ACL_ADMIN.APPEND_HOST_ACE(
-        host => 'https://opendata.paris.fr/',
-        ace  =>  xs$ace_type(
-            privilege_list => xs$name_list('http'),
-            principal_name => 'EMILY',
-            principal_type => xs_acl.ptype_db
-        )
-    );
-END;
-/
+-------------------------------------------------------------
+-- Use case 3: Performance Improvement
+-------------------------------------------------------------
+
+drop table if exists posts purge;
+
+drop domain if exists BlogPost;
+
+-- Recreate the Domain with CAST/Type coercion enabled
+create domain BlogPost as json
+validate CAST using '{
+        "$id": "https://example.com/blog-post.schema.json",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "A representation of a blog post",
+        "type": "object",
+        "required": ["title", "content", "author"],
+        "properties": {
+            "title": {
+            "type": "string"
+            },
+            "content": {
+            "type": "string"
+            },
+            "publishedDate": {
+"extendedType": "timestamp",
+            "format": "date-time"
+            },
+            "author": {
+            "$ref": "https://example.com/user-profile.schema.json"
+            },
+            "tags": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+            }
+        },
+        "$def": {
+            "$id": "https://example.com/user-profile.schema.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "description": "A representation of a user profile",
+            "type": "object",
+            "required": ["username", "email"],
+            "properties": {
+            "username": {
+                "type": "string"
+            },
+            "email": {
+                "type": "string",
+                "format": "email"
+            },
+            "fullName": {
+                "type": "string"
+            },
+            "age": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "location": {
+                "type": "string"
+            },
+            "interests": {
+                "type": "array",
+                "items": {
+                "type": "string"
+                }
+            }
+            }
+        }
+        }';
+
+create table posts ( content BlogPost );
+
+-- We can retrieve the JSON schema associated to the column
+-- via the Data Use Case Domain
+select dbms_json_schema.describe( 'POSTS' );
+
+-- works
+insert into posts values (
+    '{
+        "title": "Best brownies recipe ever!",
+        "content": "Take chocolate...",
+        "publishedDate": "2025-05-21T13:00:00Z",
+        "author": {
+            "username": "Loïc",
+            "email": "loic@emil.com"
+        },
+        "tags": ["Cooking", "Chocolate", "Cocooning"]
+    }'
+);
+commit;
+
+-- Now let's look at the publishedDate field...
+select p.content.publishedDate from posts p;
+
+-- ...its binary encoded data type is 'timestamp'
+select p.content.publishedDate.type() from posts p;
+
+-- I can add 5 days to this date...
+select p.content.publishedDate.timestamp() + interval '5' day
+from posts p;
+
+-------------------------------------------------------------
+-- Use case 4: Relational Model Evolution
+-------------------------------------------------------------
+-- drop table if exists orders purge;
+
+create table orders ( j json );
+
+insert into orders(j) values (
+  json {'firstName':'Loïc', 'address' : 'Paris'}
+);
+commit;
+
+select j from orders;
+
+-- drop index s_idx force;
+
+-- Create a Full-Text Search index for JSON with Data Guide
+-- enabled and add_vc stored procedure enabled to change
+-- table structure: add virtual column for JSON fields,
+-- helpful for Analytics => you directly have the existing
+-- JSON fields listed as columns!
+create search index s_idx on orders(j) for json
+parameters('dataguide on change add_vc');
+
+select * from orders;
+
+insert into orders(j) values (
+  json {'firstName':'Loïc', 'address' : 'Paris', 
+        'vat': false}
+);
+commit;
+
+select * from orders;
+
+insert into orders(j) values (
+  json {'firstName':'Loïc', 'address' : 'Paris', 
+        'vat': false, 'tableEvolve': true}
+);
+commit;
+
+select * from orders;
