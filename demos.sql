@@ -1,3 +1,4 @@
+---------------------------------------------------------------------------
 -- Select AI
 CREATE OR REPLACE DIRECTORY ONNX_DIR AS 'onnx_model';
 
@@ -83,8 +84,8 @@ END;
 ------------------------------------------------
 EXEC DBMS_CLOUD_AI.SET_PROFILE('OCI_GENAI');
 
--- create a vector index with the vector store name, object store location and
--- object store credential
+-- create a vector index with the vector store name, object store location
+-- and object store credential
 BEGIN
        begin DBMS_CLOUD_AI.DROP_VECTOR_INDEX(
          index_name  => 'MY_INDEX' );
@@ -106,17 +107,16 @@ BEGIN
       status => 'Enabled');
 END;
 /
+-- end installation
 
+-- Demo starts!
 EXEC DBMS_CLOUD_AI.SET_PROFILE('OCI_GENAI');
 
-select ai narrate what is a JSON schema;
-select ai narrate is a JSON schema a json document;
+select ai narrate qu''est-ce qu''un schéma JSON;
 select ai chat what are the use cases for json schema;
 select ai chat summarize the use cases for json schema and give me only the 3 most important;
 
 select ai narrate what is a JSON Relational Duality view;
-
-select ai narrate can we create TTL index for JSON data with the Oracle database;
 
 select dbms_cloud_ai.generate(
     prompt => 'Is it possible to migrate from MongoDB to Oracle database?',
@@ -129,20 +129,255 @@ select ai narrate what is the Oracle Database API for MongoDB;
 select ai narrate what is the OSON format in the Oracle database;
 
 
--- ####################################################################################################
--- JSON schema
+---------------------------------------------------------------------------
+-- JSON schemas
 
 -- setup
 exec ords.enable_schema;
 
+-- cleanup
+alter session set NLS_TIMESTAMP_FORMAT='RR-MM-DD"T"HH24:MI:SS"Z"';
+set linesize 65;
+set long 10000;
+set pagesize 1;
+drop table if exists blog_posts purge;
+drop table if exists products purge;
+drop view if exists products_dv;
+drop table if exists posts purge;
+drop domain if exists BlogPost;
+drop table if exists orders purge;
+drop table if exists test purge;
 
+-------------------------------------------------------------
+-- Use case 1: structure discovery with JSON Data Guide
+-------------------------------------------------------------
+
+create table blog_posts (
+  data json -- BINARY JSON
+);
+
+insert into blog_posts(data) values(
+    json {
+        'title': 'New Blog Post',
+        'content': 'This is the content of the blog post...',
+        'publishedDate': '2023-08-25T15:00:00Z',
+        'author': {
+            'username': 'authoruser',
+            'email': 'author@example.com'
+        },
+        'tags': ['Technology', 'Programming']
+    }
+);
+commit;
+
+-- SQL dot notation to navigate in JSON hierarchy
+select p.data.title, 
+       p.data.author.username.string() as username,
+       p.data.tags[1].string() as "array_field[1]"
+  from blog_posts p;
+
+-- Nothing prevents inserting bad data!
+insert into blog_posts values('{"garbageDocument":true}');
+commit;
+
+select data from blog_posts;
+
+-- JSON Schema to the rescue, but how to create it? 
+-- Ask the database!
+-- Remark: you need data!
+select json_dataguide(
+    data, 
+    dbms_json.format_schema,
+    dbms_json.pretty
+) as json_schema
+from blog_posts;
+
+-------------------------------------------------------------
+-- Use case 2: Data Validation
+-------------------------------------------------------------
+
+-- Validate the generated JSON schema
+select dbms_json_schema.is_schema_valid( 
+    (
+      -- Generate JSON Data Guide/Schema from data column
+      select json_dataguide(
+        data,
+        dbms_json.format_schema,
+        dbms_json.pretty
+      ) as json_schema
+      from blog_posts
+    ) 
+) = 1 as is_schema_valid;
+
+-- Validate current JSON data with a simple JSON schema
+select data from blog_posts;
+
+select dbms_json_schema.validate_report( data,
+  json( '{
+          "type" : "object",
+          "properties" :
+          { 
+            "tags" :
+            {
+              "type" : "array",
+              "items" :
+              {
+                "type" : "string"
+              }
+            }
+          }
+        }'
+    )
+  ) as report
+from blog_posts;
+
+-- Validation *REPORT* with a JSON schema on all the data
+-- Source: https://json-schema.org/learn/json-schema-examples#blog-post
+select dbms_json_schema.validate_report( 
+  data,
+  json('{
+    "$id": "https://example.com/blog-post.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "A representation of a blog post",
+    "type": "object",
+    "required": ["title", "content", "author"],
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "content": {
+        "type": "string"
+      },
+      "publishedDate": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "author": {
+        "$ref": "https://example.com/user-profile.schema.json"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "$def": {
+      "$id": "https://example.com/user-profile.schema.json",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A representation of a user profile",
+      "type": "object",
+      "required": ["username", "email"],
+      "properties": {
+        "username": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "fullName": {
+          "type": "string"
+        },
+        "age": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "location": {
+          "type": "string"
+        },
+        "interests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }')
+) as report
+from blog_posts;
+
+-- Validate data only (no detailed report)
+select dbms_json_schema.is_valid( 
+    data,
+    json('{
+        "$id": "https://example.com/blog-post.schema.json",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "A representation of a blog post",
+        "type": "object",
+        "required": ["title", "content", "author"],
+        "properties": {
+            "title": {
+            "type": "string"
+            },
+            "content": {
+            "type": "string"
+            },
+            "publishedDate": {
+            "type": "string",
+            "format": "date-time"
+            },
+            "author": {
+            "$ref": "https://example.com/user-profile.schema.json"
+            },
+            "tags": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+            }
+        },
+        "$def": {
+            "$id": "https://example.com/user-profile.schema.json",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "description": "A representation of a user profile",
+            "type": "object",
+            "required": ["username", "email"],
+            "properties": {
+            "username": {
+                "type": "string"
+            },
+            "email": {
+                "type": "string",
+                "format": "email"
+            },
+            "fullName": {
+                "type": "string"
+            },
+            "age": {
+                "type": "integer",
+                "minimum": 0
+            },
+            "location": {
+                "type": "string"
+            },
+            "interests": {
+                "type": "array",
+                "items": {
+                "type": "string"
+                }
+            }
+            }
+        }
+        }')
+  ) = 1 as is_valid, 
+  data 
+from blog_posts;
+
+-- Also create a JSON schema: from a Relational table!
+select dbms_json_schema.describe( 'BLOG_POSTS' );
+
+---------------------------------------------------------------
 -- Client-side validation using JSON Schema
 -- https://github.com/remoteoss/json-schema-form
 -- drop table if exists products purge;
 
 create table products (
   name     varchar2(100) not null primary key constraint minimal_name_length check (length(name) >= 3),
+  
   price    number not null constraint strictly_positive_price check (price > 0),
+  
   quantity number not null constraint non_negative_quantity check (quantity >= 0)
 );
 
@@ -183,42 +418,59 @@ select column_name, annotation_name, annotation_value
    and object_type='TABLE'
 order by 1, 2;
 
--- Annotate JSON Schema with column level annotations
-create or replace function getAnnotatedJSONSchema( p_table_name in varchar2 )
-return json
-as
-  schema clob;
-  l_schema JSON_OBJECT_T;
-  l_properties JSON_OBJECT_T;
-  l_keys JSON_KEY_LIST;
-  l_column JSON_OBJECT_T;
-begin
-  -- get JSON schema of table
-  select json_serialize( dbms_json_schema.describe( p_table_name )
-                         returning clob ) into schema;
+set define §
+set verify off
+create or replace mle module json_schema_module
+language javascript as
+export function getAnnotatedJSONSchema(tableName) {
+    if (tableName == null) {
+        throw new Error(`Parameter tableName either not provided or null`);
+    }
 
-  l_schema := JSON_OBJECT_T.parse( schema );
-  l_properties := l_schema.get_Object('properties');
+    try {
+        // Get JSON Schema for tableName
+        const schema = session.execute(
+            `select dbms_json_schema.describe( :table_name ) as "schema"`,
+            [ tableName ], { outFormat: oracledb.OUT_FORMAT_OBJECT } ).rows[0].schema;
+            
+        // Get JSON Schema array properties
+        const properties = schema.properties;
 
-  l_keys := l_properties.get_Keys();
-  for i in 1..l_keys.count loop
-    l_column := l_properties.get_Object( l_keys(i) );
+        // Retrieve all column annotations from dictionnary...
+        for(let annotationRow of (session.execute(
+            `select COLUMN_NAME, ANNOTATION_NAME, ANNOTATION_VALUE 
+                from user_annotations_usage
+                where object_name=:table_name
+                and object_type='TABLE' 
+                and json_exists( :properties, '$?(@ == $B0)' PASSING column_name AS "B0" )`,
+            { 
+                table_name:{
+                    dir: oracledb.BIND_IN,
+                    val: tableName,
+                    type: oracledb.STRING
+                },
+                properties:{
+                    dir: oracledb.BIND_IN,
+                    val: Object.keys(properties),
+                    type: oracledb.DB_TYPE_JSON
+                }
+            }, { outFormat: oracledb.OUT_FORMAT_OBJECT } ).rows) ) {
+                // ...and augment the existing properties
+                const columnDoc = properties[annotationRow.COLUMN_NAME];
+                columnDoc[ annotationRow.ANNOTATION_NAME ] = annotationRow.ANNOTATION_VALUE;
+            }
 
-    for c in (select ANNOTATION_NAME, ANNOTATION_VALUE 
-      from user_annotations_usage
-     where object_name=p_table_name 
-       and object_type='TABLE' 
-       and column_name=l_keys(i))
-    loop
-      l_column.put( c.ANNOTATION_NAME, c.ANNOTATION_VALUE );
-    end loop;
-  end loop;
+        // Returns annotated JSON Schema
+        return schema;
+    } catch (err) {
+        return {"Error": err.message};
+    }
 
-  -- dbms_output.put_line( 'Schema: ' || l_schema.to_clob );
-
-  return l_schema.to_json;
-end;
+    return {};
+}
 /
+
+select dbms_json_schema.describe( 'PRODUCTS' ) as schema;
 
 select getAnnotatedJSONSchema('PRODUCTS');
 
@@ -340,4 +592,88 @@ COMMIT;
 
 END;
 
+/
+
+
+
+
+
+create json collection table customers;
+
+insert /*+ append */ into customers(data)
+select json { 'name' : 'Customer ' || level,
+              'data' : dbms_random.string('X',4000),
+              'active' : case when dbms_random.value < 0.05 then true else false end } from dual connect by level <= 100000;
+commit;
+
+insert /*+ append */ into customers(data)
+select json_transform(data, set '$.active' = false, set '$._id' = json_id('OID')) from customers;
+commit;
+
+
+select /*+ NOPARALLEL OPT_PARAM('cell_offload_processing' 'false') */ count(*) from customers
+where json_exists(data, '$.active?(@ == true)');
+
+select count(*) from customers;
+select avg(length(data)) from customers;
+
+select count(*) from customers
+where json_exists(data, '$.active?(@ == true)');
+
+
+SET DEFINE OFF
+BEGIN
+  DBMS_CLOUD.CREATE_EXTERNAL_TABLE (
+   table_name => 'ext_tab_url',
+   file_uri_list => 'https://opendata.paris.fr/api/records/1.0/search/?dataset=arbresremarquablesparis&q=&lang=en&rows=200&facet=genre&facet=espece&facet=stadedeveloppement&facet=varieteoucultivar&facet=dateplantation&facet=libellefrancais',
+   column_list => 'DATA JSON'
+);
+END;
+/
+
+create or replace mle module json_fetch
+language javascript as
+import "mle-js-fetch";
+export async function fetchJSONData(url) {
+    if (url === undefined || url.length < 0) {
+        throw Error("please provide a valid URL");
+    }
+    const response = await fetch(url);
+    if (! response.ok) {
+        throw new Error(`An error occurred: ${response.status}`);
+    }
+    return await response.json();
+}
+/
+
+create or replace function fetchJSONData( p_url varchar2 ) 
+return json
+as mle module json_fetch
+signature 'fetchJSONData';
+/
+
+set define §;
+set verify off;
+with my_data(doc) as (select treat(fetchJSONData('https://opendata.paris.fr/api/records/1.0/search/?dataset=arbresremarquablesparis&q=&lang=en&rows=200&facet=genre&facet=espece&facet=stadedeveloppement&facet=varieteoucultivar&facet=dateplantation&facet=libellefrancais') as json))
+--select doc from my_data;
+select to_char(j.birthday,'DD/MM/YYYY') as birthday,
+       j.name,
+       j.location
+  from my_data nested doc columns ( nested records[*] columns (
+  birthday timestamp path '$.fields.arbres_dateplantation.timestamp()',
+  name path '$.fields.arbres_libellefrancais',
+  location path '$.fields.arbres_arrondissement'
+) ) j
+order by j.birthday fetch first 3 rows only;
+
+BEGIN
+    DBMS_NETWORK_ACL_ADMIN.APPEND_HOST_ACE(
+        host => 'https://opendata.paris.fr/',
+        ace  =>  xs$ace_type(
+            privilege_list => xs$name_list('http'),
+            principal_name => 'EMILY',
+            principal_type => xs_acl.ptype_db
+        )
+    );
+END;
 /
