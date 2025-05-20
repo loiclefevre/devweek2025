@@ -178,8 +178,16 @@ select to_char(j.birthday,'DD/MM/YYYY') as birthday,
 order by j.birthday fetch first 3 rows only;
 
 ---------------------------------------------------------------
--- 
-
+-- Other way using solely SQL
+set define §;
+set verify off;
+select *
+from external (
+    (data json)
+    type ORACLE_BIGDATA
+    access parameters (com.oracle.bigdata.fileformat = jsondoc)
+    location ('https://opendata.paris.fr/api/records/1.0/search/?dataset=arbresremarquablesparis&q=&lang=en&rows=200&facet=genre&facet=espece&facet=stadedeveloppement&facet=varieteoucultivar&facet=dateplantation&facet=libellefrancais')
+);
 
 ---------------------------------------------------------------
 -- JSON schemas
@@ -836,3 +844,53 @@ select * from orders;
 -- Perfs Offloading Autonomous Database / Exadata
 
 -- SEE PERFS_OFFLOADING.SQL
+
+---------------------------------------------------------------
+-- MongoDB API, Aggregation Pipeline
+db.CUSTOMERS.aggregate( [
+  {
+    $match: {
+      name: { $regex: "customer 1", "$options" : "i" }
+    }
+  },
+  {
+    $group: {
+      _id: {
+        active: "$active"
+      },
+      count: {
+        $count: {}
+      }
+    }
+  }
+], {hint:{$service:"HIGH"}} );
+
+db.CUSTOMERS.aggregate( [
+  {
+    $match: {
+      name: { $regex: "customer 1", "$options" : "i" }
+    }
+  },
+  {
+    $group: {
+      _id: {
+        active: "$active"
+      },
+      count: {
+        $count: {}
+      }
+    }
+  }
+], {hint:{$service:"HIGH"}} ).explain();
+
+
+db.aggregate( [
+    {
+      $external : 'https://raw.githubusercontent.com/neelabalan/mongodb-sample-dataset/main/sample_mflix/movies.json'
+    },
+    {
+      $out: 'movies'
+    }
+], 
+{ hint:{$service:"HIGH"} }
+);
