@@ -126,6 +126,6 @@ select dbms_cloud_ai.generate(
 
 select ai narrate what is the Oracle Database API for MongoDB;
 
-select ai narrate what is the OSON format in the Oracle database;
+select ai narrate what is the OSON format for the Oracle database;
 
 select ai narrate what is the usage of the column ETAG for a json collection table;
