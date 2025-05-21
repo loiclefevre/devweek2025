@@ -52,7 +52,7 @@ select to_char(j.birthday,'DD/MM/YYYY') as birthday,
 order by j.birthday fetch first 3 rows only;
 
 ---------------------------------------------------------------
--- Other way using solely SQL
+-- En utilisant uniquement du SQL
 set define §;
 set verify off;
 select *
@@ -437,6 +437,13 @@ commit;
 select * from products_dv;
 select * from products;
 
+-- Change annotations reflected immediately...
+alter table products modify NAME annotations (
+  ADD OR REPLACE "title" 'Product Name',
+  ADD OR REPLACE "description" 
+                     'Product name (min length: 5, max length: 100)',
+  ADD OR REPLACE "minLength" '5'
+);
 
 -- validate data
 select json{*} as data,
