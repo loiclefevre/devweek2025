@@ -662,7 +662,7 @@ insert into posts values (
         "publishedDate": "2025-05-21T13:00:00Z",
         "author": {
             "username": "Loïc",
-            "email": "loic@emil.com"
+            "email": "loic@email.com"
         },
         "tags": ["Cooking", "Chocolate", "Cocooning"]
     }'
